@@ -1,0 +1,32 @@
+# Clear Temp folders
+Write-Host "Cleaning Temp folders..."
+
+$folders = @(
+    "$env:TEMP",
+    "C:\Windows\Temp",
+    "$env:LOCALAPPDATA\Temp"
+)
+
+foreach ($folder in $folders) {
+    if (Test-Path $folder) {
+        Get-ChildItem $folder -Force -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Empty Recycle Bin
+Write-Host "Emptying Recycle Bin..."
+Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+
+# Windows Update Cache
+Write-Host "Cleaning Windows Update cache..."
+Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
+Remove-Item "C:\Windows\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue
+Start-Service wuauserv -ErrorAction SilentlyContinue
+
+# Delivery Optimization Cache
+Write-Host "Cleaning Delivery Optimization..."
+Remove-Item "C:\ProgramData\Microsoft\Windows\DeliveryOptimization\Cache\*" -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host ""
+Write-Host "Finished!"
