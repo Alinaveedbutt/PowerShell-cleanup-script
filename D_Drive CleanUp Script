@@ -1,0 +1,236 @@
+# ============================================================
+# DISK D: SAFE CLEANUP
+# Temp Files + Cache Files + Log Files + Duplicate Detection
+# ============================================================
+
+Write-Host "========================================"
+Write-Host "       DISK D: SAFE CLEANUP"
+Write-Host "========================================"
+Write-Host ""
+
+# ------------------------------------------------------------
+# 1. Clean dedicated temporary folders
+# ------------------------------------------------------------
+
+Write-Host "Cleaning dedicated Temp folders..."
+
+$tempFolders = @(
+    "D:\Temp",
+    "D:\tmp"
+)
+
+foreach ($folder in $tempFolders) {
+
+    if (Test-Path $folder) {
+
+        Write-Host "Cleaning: $folder"
+
+        Get-ChildItem $folder -Force -ErrorAction SilentlyContinue |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ------------------------------------------------------------
+# 2. Clean Cache / Logs folders
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "Scanning D: for dedicated Cache and Logs folders..."
+
+$cleanupFiles = Get-ChildItem "D:\" -File -Recurse -Force `
+    -ErrorAction SilentlyContinue |
+    Where-Object {
+
+        $path = $_.FullName
+
+        # Never touch these protected locations
+        if (
+            $path.StartsWith("D:\System Volume Information", [System.StringComparison]::OrdinalIgnoreCase) -or
+            $path.StartsWith("D:\$RECYCLE.BIN", [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            return $false
+        }
+
+        # Only clean files inside folders explicitly named:
+        # Temp, tmp, Cache, Caches, Log, Logs
+        $directoryNames = $_.Directory.FullName -split '\\'
+
+        $insideCleanupFolder = $false
+
+        foreach ($name in $directoryNames) {
+
+            if (
+                $name -ieq "Temp"   -or
+                $name -ieq "tmp"    -or
+                $name -ieq "Cache"  -or
+                $name -ieq "Caches" -or
+                $name -ieq "Log"    -or
+                $name -ieq "Logs"
+            ) {
+                $insideCleanupFolder = $true
+                break
+            }
+        }
+
+        if (-not $insideCleanupFolder) {
+            return $false
+        }
+
+        # Only target temporary/cache/log file types
+        $_.Extension -in @(
+            ".tmp",
+            ".temp",
+            ".cache",
+            ".log"
+        )
+    }
+
+foreach ($file in $cleanupFiles) {
+
+    Write-Host "Removing: $($file.FullName)"
+
+    Remove-Item $file.FullName `
+        -Force `
+        -ErrorAction SilentlyContinue
+}
+
+# ------------------------------------------------------------
+# 3. Empty D: Recycle Bin
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "Emptying D: Recycle Bin..."
+
+Clear-RecycleBin `
+    -DriveLetter D `
+    -Force `
+    -ErrorAction SilentlyContinue
+
+# ------------------------------------------------------------
+# 4. Find EXACT duplicate files
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "       SCANNING FOR DUPLICATES"
+Write-Host "========================================"
+Write-Host ""
+
+Write-Host "Scanning D:..."
+Write-Host "This can take some time on a large drive."
+Write-Host ""
+
+$files = Get-ChildItem "D:\" `
+    -File `
+    -Recurse `
+    -Force `
+    -ErrorAction SilentlyContinue |
+    Where-Object {
+
+        $_.FullName -notlike "D:\System Volume Information\*" -and
+        $_.FullName -notlike "D:\$RECYCLE.BIN\*"
+    }
+
+Write-Host "Files scanned: $($files.Count)"
+Write-Host ""
+
+# Files with different sizes cannot be identical.
+$sizeGroups = $files |
+    Group-Object Length |
+    Where-Object { $_.Count -gt 1 }
+
+$duplicateGroups = 0
+$duplicateFiles = 0
+$duplicateSpace = 0
+
+foreach ($group in $sizeGroups) {
+
+    $hashResults = @()
+
+    foreach ($file in $group.Group) {
+
+        try {
+
+            $hash = Get-FileHash `
+                -Path $file.FullName `
+                -Algorithm SHA256 `
+                -ErrorAction Stop
+
+            $hashResults += $hash
+
+        }
+        catch {
+            # Skip files that cannot be read
+        }
+    }
+
+    $hashGroups = $hashResults |
+        Group-Object Hash |
+        Where-Object { $_.Count -gt 1 }
+
+    foreach ($hashGroup in $hashGroups) {
+
+        $duplicateGroups++
+
+        Write-Host "----------------------------------------"
+        Write-Host "EXACT DUPLICATE GROUP"
+        Write-Host "----------------------------------------"
+
+        foreach ($duplicate in $hashGroup.Group) {
+
+            $fileInfo = Get-Item `
+                $duplicate.Path `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+            if ($fileInfo) {
+                Write-Host $fileInfo.FullName
+            }
+        }
+
+        # Everything after the first file is a duplicate,
+        # but NOTHING is automatically deleted.
+        $duplicatesInGroup = $hashGroup.Group | Select-Object -Skip 1
+
+        foreach ($duplicate in $duplicatesInGroup) {
+
+            $fileInfo = Get-Item `
+                $duplicate.Path `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+            if ($fileInfo) {
+
+                $duplicateFiles++
+                $duplicateSpace += $fileInfo.Length
+            }
+        }
+
+        Write-Host ""
+    }
+}
+
+# ------------------------------------------------------------
+# 5. Final report
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "========================================"
+Write-Host "          CLEANUP FINISHED"
+Write-Host "========================================"
+Write-Host ""
+
+Write-Host "Temporary/cache/log files cleaned."
+Write-Host ""
+
+Write-Host "Exact duplicate groups found: $duplicateGroups"
+Write-Host "Potential duplicate copies: $duplicateFiles"
+Write-Host "Potential duplicate space: $([math]::Round($duplicateSpace / 1GB, 2)) GB"
+
+Write-Host ""
+Write-Host "IMPORTANT:"
+Write-Host "Duplicate files were NOT automatically deleted."
+Write-Host "Review the duplicate paths above before removing anything."
+
+Write-Host ""
+Write-Host "D: cleanup complete."
