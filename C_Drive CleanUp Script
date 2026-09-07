@@ -1,32 +1,674 @@
-# Clear Temp folders
-Write-Host "Cleaning Temp folders..."
+# ============================================================
+# C: DRIVE DEEP CLEAN + DUPLICATE FINDER
+# ============================================================
+# Run PowerShell as Administrator.
+#
+# SAFETY:
+# - Does NOT blindly delete Windows/system/program files.
+# - Cleans known temporary/cache locations.
+# - Duplicate deletion requires confirmation.
+# - Duplicate detection uses SHA256 hashes.
+# ============================================================
 
-$folders = @(
-    "$env:TEMP",
-    "C:\Windows\Temp",
-    "$env:LOCALAPPDATA\Temp"
-)
+$ErrorActionPreference = "SilentlyContinue"
 
-foreach ($folder in $folders) {
-    if (Test-Path $folder) {
-        Get-ChildItem $folder -Force -ErrorAction SilentlyContinue |
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+$Drive = "C:\"
+$StartTime = Get-Date
+
+function Format-Size {
+    param([long]$Bytes)
+
+    if ($Bytes -ge 1TB) {
+        return "{0:N2} TB" -f ($Bytes / 1TB)
+    }
+    elseif ($Bytes -ge 1GB) {
+        return "{0:N2} GB" -f ($Bytes / 1GB)
+    }
+    elseif ($Bytes -ge 1MB) {
+        return "{0:N2} MB" -f ($Bytes / 1MB)
+    }
+    elseif ($Bytes -ge 1KB) {
+        return "{0:N2} KB" -f ($Bytes / 1KB)
+    }
+    else {
+        return "$Bytes bytes"
     }
 }
 
-# Empty Recycle Bin
-Write-Host "Emptying Recycle Bin..."
-Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+function Get-FreeSpace {
+    return (Get-PSDrive C).Free
+}
 
-# Windows Update Cache
-Write-Host "Cleaning Windows Update cache..."
-Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
-Remove-Item "C:\Windows\SoftwareDistribution\Download\*" -Recurse -Force -ErrorAction SilentlyContinue
-Start-Service wuauserv -ErrorAction SilentlyContinue
+function Remove-Safely {
+    param(
+        [string]$Path,
+        [string]$Description
+    )
 
-# Delivery Optimization Cache
-Write-Host "Cleaning Delivery Optimization..."
-Remove-Item "C:\ProgramData\Microsoft\Windows\DeliveryOptimization\Cache\*" -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $Path)) {
+        return 0
+    }
+
+    Write-Host ""
+    Write-Host "[CLEAN] $Description" -ForegroundColor Cyan
+    Write-Host "        $Path"
+
+    $Before = Get-FreeSpace
+
+    try {
+        Get-ChildItem -LiteralPath $Path -Force -Recurse -ErrorAction SilentlyContinue |
+            Where-Object {
+                -not $_.PSIsContainer
+            } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+        Get-ChildItem -LiteralPath $Path -Force -Recurse -Directory -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+    }
+    catch {}
+
+    $After = Get-FreeSpace
+    $Recovered = $After - $Before
+
+    if ($Recovered -gt 0) {
+        Write-Host "        Freed: $(Format-Size $Recovered)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "        Nothing removable found."
+    }
+
+    return $Recovered
+}
 
 Write-Host ""
-Write-Host "Finished!"
+Write-Host "============================================================" -ForegroundColor DarkCyan
+Write-Host "              C: DRIVE DEEP CLEANER" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor DarkCyan
+Write-Host ""
+
+$InitialFree = Get-FreeSpace
+$InitialTotal = (Get-PSDrive C).Used + (Get-PSDrive C).Free
+
+Write-Host "Initial free space : $(Format-Size $InitialFree)"
+Write-Host "Initial used space : $(Format-Size ((Get-PSDrive C).Used))"
+Write-Host ""
+
+# ============================================================
+# 1. USER TEMP
+# ============================================================
+
+$TotalRecovered = 0
+
+$TotalRecovered += Remove-Safely `
+    -Path $env:TEMP `
+    -Description "User TEMP files"
+
+$TotalRecovered += Remove-Safely `
+    -Path "$env:LOCALAPPDATA\Temp" `
+    -Description "LocalAppData TEMP files"
+
+
+# ============================================================
+# 2. WINDOWS TEMP
+# ============================================================
+
+$TotalRecovered += Remove-Safely `
+    -Path "C:\Windows\Temp" `
+    -Description "Windows TEMP files"
+
+
+# ============================================================
+# 3. WINDOWS ERROR REPORTING
+# ============================================================
+
+$TotalRecovered += Remove-Safely `
+    -Path "C:\ProgramData\Microsoft\Windows\WER\ReportArchive" `
+    -Description "Windows Error Reporting archive"
+
+$TotalRecovered += Remove-Safely `
+    -Path "C:\ProgramData\Microsoft\Windows\WER\ReportQueue" `
+    -Description "Windows Error Reporting queue"
+
+
+# ============================================================
+# 4. CRASH DUMPS
+# ============================================================
+
+$CrashLocations = @(
+    "C:\Windows\Minidump",
+    "C:\Windows\LiveKernelReports"
+)
+
+foreach ($Path in $CrashLocations) {
+    $TotalRecovered += Remove-Safely `
+        -Path $Path `
+        -Description "Old crash dump data"
+}
+
+
+# ============================================================
+# 5. WINDOWS UPDATE DOWNLOAD CACHE
+# ============================================================
+
+Write-Host ""
+Write-Host "[CLEAN] Windows Update download cache" -ForegroundColor Cyan
+
+try {
+    Stop-Service wuauserv -Force -ErrorAction SilentlyContinue
+    Stop-Service bits -Force -ErrorAction SilentlyContinue
+
+    $Before = Get-FreeSpace
+
+    Remove-Safely `
+        -Path "C:\Windows\SoftwareDistribution\Download" `
+        -Description "Windows Update downloaded packages"
+
+    Start-Service bits -ErrorAction SilentlyContinue
+    Start-Service wuauserv -ErrorAction SilentlyContinue
+
+    $After = Get-FreeSpace
+    $Recovered = $After - $Before
+
+    if ($Recovered -gt 0) {
+        $TotalRecovered += $Recovered
+    }
+}
+catch {}
+
+
+# ============================================================
+# 6. DELIVERY OPTIMIZATION CACHE
+# ============================================================
+
+$TotalRecovered += Remove-Safely `
+    -Path "C:\Windows\SoftwareDistribution\DeliveryOptimization" `
+    -Description "Delivery Optimization cache"
+
+
+# ============================================================
+# 7. THUMBNAIL CACHE
+# ============================================================
+
+Write-Host ""
+Write-Host "[CLEAN] Thumbnail caches" -ForegroundColor Cyan
+
+$Before = Get-FreeSpace
+
+Get-ChildItem `
+    "$env:LOCALAPPDATA\Microsoft\Windows\Explorer" `
+    -Filter "thumbcache_*.db" `
+    -Force `
+    -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+
+$After = Get-FreeSpace
+$Recovered = $After - $Before
+
+if ($Recovered -gt 0) {
+    $TotalRecovered += $Recovered
+    Write-Host "        Freed: $(Format-Size $Recovered)" -ForegroundColor Green
+}
+
+
+# ============================================================
+# 8. ICON CACHE
+# ============================================================
+
+$IconCache = "$env:LOCALAPPDATA\IconCache.db"
+
+if (Test-Path $IconCache) {
+    $Before = Get-FreeSpace
+
+    Remove-Item $IconCache -Force -ErrorAction SilentlyContinue
+
+    $After = Get-FreeSpace
+    $Recovered = $After - $Before
+
+    if ($Recovered -gt 0) {
+        $TotalRecovered += $Recovered
+    }
+}
+
+
+# ============================================================
+# 9. RECYCLE BIN
+# ============================================================
+
+Write-Host ""
+Write-Host "[CLEAN] Recycle Bin" -ForegroundColor Cyan
+
+$Before = Get-FreeSpace
+
+try {
+    Clear-RecycleBin -DriveLetter C -Force -ErrorAction SilentlyContinue
+}
+catch {}
+
+$After = Get-FreeSpace
+$Recovered = $After - $Before
+
+if ($Recovered -gt 0) {
+    $TotalRecovered += $Recovered
+    Write-Host "        Freed: $(Format-Size $Recovered)" -ForegroundColor Green
+}
+else {
+    Write-Host "        Recycle Bin already empty."
+}
+
+
+# ============================================================
+# 10. BROWSER CACHE
+# ============================================================
+
+Write-Host ""
+Write-Host "[CLEAN] Browser caches" -ForegroundColor Cyan
+
+$BrowserCachePaths = @(
+    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache",
+    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache",
+    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache",
+    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache",
+    "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\Cache",
+    "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles"
+)
+
+foreach ($Path in $BrowserCachePaths) {
+
+    if (Test-Path $Path) {
+
+        $TotalRecovered += Remove-Safely `
+            -Path $Path `
+            -Description "Browser cache"
+    }
+}
+
+
+# ============================================================
+# 11. NVIDIA SHADER CACHE
+# ============================================================
+
+$NvidiaCaches = @(
+    "$env:LOCALAPPDATA\NVIDIA\DXCache",
+    "$env:LOCALAPPDATA\NVIDIA\GLCache",
+    "$env:LOCALAPPDATA\NVIDIA Corporation\NV_Cache"
+)
+
+foreach ($Path in $NvidiaCaches) {
+
+    if (Test-Path $Path) {
+
+        $TotalRecovered += Remove-Safely `
+            -Path $Path `
+            -Description "NVIDIA shader cache"
+    }
+}
+
+
+# ============================================================
+# 12. DIRECTX SHADER CACHE
+# ============================================================
+
+$TotalRecovered += Remove-Safely `
+    -Path "$env:LOCALAPPDATA\D3DSCache" `
+    -Description "DirectX shader cache"
+
+
+# ============================================================
+# 13. MICROSOFT STORE CACHE
+# ============================================================
+
+$StoreCache = "$env:LOCALAPPDATA\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalCache"
+
+if (Test-Path $StoreCache) {
+
+    $TotalRecovered += Remove-Safely `
+        -Path $StoreCache `
+        -Description "Microsoft Store cache"
+}
+
+
+# ============================================================
+# 14. OLD TEMPORARY INSTALLATION FILES
+# ============================================================
+
+Write-Host ""
+Write-Host "[CLEAN] Old temporary installation files" -ForegroundColor Cyan
+
+$TempPatterns = @(
+    "C:\*.tmp",
+    "C:\Windows\*.tmp"
+)
+
+foreach ($Pattern in $TempPatterns) {
+
+    Get-ChildItem $Pattern -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            -not $_.PSIsContainer
+        } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
+
+# ============================================================
+# 15. WINDOWS COMPONENT CLEANUP
+# ============================================================
+
+Write-Host ""
+Write-Host "[CLEAN] Windows component store" -ForegroundColor Cyan
+Write-Host "        Running DISM component cleanup..." -ForegroundColor DarkGray
+
+$Before = Get-FreeSpace
+
+try {
+    Start-Process `
+        -FilePath "DISM.exe" `
+        -ArgumentList "/Online","/Cleanup-Image","/StartComponentCleanup" `
+        -Wait `
+        -NoNewWindow
+}
+catch {}
+
+$After = Get-FreeSpace
+$Recovered = $After - $Before
+
+if ($Recovered -gt 0) {
+    $TotalRecovered += $Recovered
+    Write-Host "        Freed: $(Format-Size $Recovered)" -ForegroundColor Green
+}
+
+
+# ============================================================
+# 16. FIND DUPLICATES
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor DarkYellow
+Write-Host "                 DUPLICATE FILE SCAN" -ForegroundColor Yellow
+Write-Host "============================================================" -ForegroundColor DarkYellow
+Write-Host ""
+
+Write-Host "Scanning C: for duplicate files..." -ForegroundColor Cyan
+Write-Host "This can take a while depending on the amount of data." -ForegroundColor DarkGray
+Write-Host ""
+
+# Directories that should NEVER be scanned for duplicates.
+$ExcludedRoots = @(
+    "C:\Windows",
+    "C:\Program Files",
+    "C:\Program Files (x86)",
+    "C:\ProgramData\Microsoft",
+    "C:\$Recycle.Bin",
+    "C:\System Volume Information"
+)
+
+function Is-Excluded {
+    param([string]$Path)
+
+    foreach ($Root in $ExcludedRoots) {
+        if ($Path.StartsWith($Root, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+# Candidate extensions.
+# We focus on files where duplicate deletion is generally useful.
+$DuplicateExtensions = @(
+    ".jpg",".jpeg",".png",".gif",".webp",".bmp",
+    ".mp4",".mkv",".avi",".mov",".wmv",
+    ".mp3",".wav",".flac",".m4a",
+    ".pdf",".doc",".docx",".xls",".xlsx",".ppt",".pptx",
+    ".zip",".rar",".7z",
+    ".iso",
+    ".txt",".csv",
+    ".psd",
+    ".blend",
+    ".obj",".fbx",
+    ".cpp",".h",".hpp",".cs",".java",".py",".js",".ts",
+    ".html",".css",
+    ".json"
+)
+
+$CandidateFiles = @()
+
+Write-Host "Collecting candidate files..." -ForegroundColor Cyan
+
+try {
+
+    Get-ChildItem C:\ -File -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+
+            (-not (Is-Excluded $_.FullName)) -and
+            ($DuplicateExtensions -contains $_.Extension.ToLower()) -and
+            ($_.Length -gt 1024)
+        } |
+        ForEach-Object {
+
+            $CandidateFiles += $_
+        }
+}
+catch {}
+
+
+Write-Host "Candidate files found: $($CandidateFiles.Count)" -ForegroundColor Green
+Write-Host ""
+
+# Group by size first.
+$PotentialGroups = $CandidateFiles |
+    Group-Object Length |
+    Where-Object { $_.Count -gt 1 }
+
+Write-Host "Files with matching sizes: $($PotentialGroups.Count) groups" -ForegroundColor Cyan
+Write-Host ""
+
+$DuplicateGroups = @()
+
+$GroupNumber = 0
+
+foreach ($Group in $PotentialGroups) {
+
+    $GroupNumber++
+
+    Write-Progress `
+        -Activity "Hashing possible duplicates" `
+        -Status "Group $GroupNumber / $($PotentialGroups.Count)" `
+        -PercentComplete (($GroupNumber / [Math]::Max($PotentialGroups.Count,1)) * 100)
+
+    $HashGroups = @{}
+
+    foreach ($File in $Group.Group) {
+
+        try {
+
+            $Hash = (Get-FileHash -LiteralPath $File.FullName -Algorithm SHA256).Hash
+
+            if (-not $HashGroups.ContainsKey($Hash)) {
+                $HashGroups[$Hash] = @()
+            }
+
+            $HashGroups[$Hash] += $File
+
+        }
+        catch {}
+    }
+
+    foreach ($Hash in $HashGroups.Keys) {
+
+        if ($HashGroups[$Hash].Count -gt 1) {
+
+            $DuplicateGroups += ,@($HashGroups[$Hash])
+        }
+    }
+}
+
+Write-Progress -Activity "Hashing possible duplicates" -Completed
+
+Write-Host ""
+Write-Host "Duplicate groups found: $($DuplicateGroups.Count)" -ForegroundColor Yellow
+Write-Host ""
+
+$PotentialDuplicateBytes = 0
+$DuplicateCount = 0
+
+foreach ($Group in $DuplicateGroups) {
+
+    # Keep the oldest file as the original.
+    $Sorted = $Group | Sort-Object LastWriteTime
+
+    $Keep = $Sorted[0]
+    $Delete = $Sorted | Select-Object -Skip 1
+
+    $DuplicateCount += $Delete.Count
+
+    foreach ($File in $Delete) {
+        $PotentialDuplicateBytes += $File.Length
+    }
+
+    Write-Host "KEEP:   $($Keep.FullName)" -ForegroundColor Green
+
+    foreach ($File in $Delete) {
+        Write-Host "DELETE: $($File.FullName)  [$(Format-Size $File.Length)]" -ForegroundColor Red
+    }
+
+    Write-Host ""
+}
+
+Write-Host "Potential duplicate files : $DuplicateCount"
+Write-Host "Potential space recovery  : $(Format-Size $PotentialDuplicateBytes)"
+Write-Host ""
+
+
+# ============================================================
+# 17. ASK BEFORE DUPLICATE DELETION
+# ============================================================
+
+if ($DuplicateCount -gt 0) {
+
+    Write-Host "============================================================" -ForegroundColor Red
+    Write-Host "             DUPLICATE DELETION CONFIRMATION" -ForegroundColor Red
+    Write-Host "============================================================" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "The files above are byte-for-byte identical." -ForegroundColor Yellow
+    Write-Host "One copy will be kept and the other copies will be deleted."
+    Write-Host ""
+    Write-Host "Potential space recovered: $(Format-Size $PotentialDuplicateBytes)"
+    Write-Host ""
+
+    $Answer = Read-Host "Delete these duplicate copies? Type YES to continue"
+
+    if ($Answer -eq "YES") {
+
+        Write-Host ""
+        Write-Host "Deleting duplicates..." -ForegroundColor Cyan
+
+        $DuplicateRecovered = 0
+
+        foreach ($Group in $DuplicateGroups) {
+
+            $Sorted = $Group | Sort-Object LastWriteTime
+
+            $Delete = $Sorted | Select-Object -Skip 1
+
+            foreach ($File in $Delete) {
+
+                try {
+
+                    $Size = $File.Length
+
+                    Remove-Item `
+                        -LiteralPath $File.FullName `
+                        -Force `
+                        -ErrorAction Stop
+
+                    $DuplicateRecovered += $Size
+
+                    Write-Host "Deleted: $($File.FullName)" -ForegroundColor Green
+
+                }
+                catch {
+
+                    Write-Host "Skipped: $($File.FullName)" -ForegroundColor DarkGray
+                }
+            }
+        }
+
+        $TotalRecovered += $DuplicateRecovered
+
+        Write-Host ""
+        Write-Host "Duplicate cleanup recovered: $(Format-Size $DuplicateRecovered)" -ForegroundColor Green
+    }
+    else {
+
+        Write-Host ""
+        Write-Host "Duplicate deletion CANCELLED." -ForegroundColor Yellow
+    }
+}
+
+
+# ============================================================
+# 18. LARGE FILE REPORT
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor DarkCyan
+Write-Host "                LARGEST FILES ON C:" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor DarkCyan
+Write-Host ""
+
+Write-Host "Finding the 30 largest accessible files..." -ForegroundColor Cyan
+
+$LargestFiles = Get-ChildItem C:\ -File -Recurse -Force -ErrorAction SilentlyContinue |
+    Where-Object {
+        -not (Is-Excluded $_.FullName)
+    } |
+    Sort-Object Length -Descending |
+    Select-Object -First 30
+
+$LargestFiles |
+    Select-Object `
+        @{Name="Size";Expression={Format-Size $_.Length}},
+        FullName |
+    Format-Table -AutoSize
+
+
+# ============================================================
+# 19. FINAL REPORT
+# ============================================================
+
+$FinalFree = Get-FreeSpace
+$ActualRecovered = $FinalFree - $InitialFree
+$Elapsed = (Get-Date) - $StartTime
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "                  CLEANUP COMPLETE" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host ""
+
+Write-Host "Free space BEFORE : $(Format-Size $InitialFree)"
+Write-Host "Free space AFTER  : $(Format-Size $FinalFree)"
+Write-Host ""
+
+if ($ActualRecovered -gt 0) {
+
+    Write-Host "SPACE RECOVERED   : $(Format-Size $ActualRecovered)" -ForegroundColor Green
+
+}
+else {
+
+    Write-Host "SPACE RECOVERED   : 0 bytes" -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "Total runtime     : $($Elapsed.ToString('hh\:mm\:ss'))"
+Write-Host ""
+
+Write-Host "Important:" -ForegroundColor Yellow
+Write-Host "Windows may recreate some caches automatically."
+Write-Host "The largest-files report above is useful for finding additional"
+Write-Host "space-consuming files that should be reviewed manually."
+Write-Host ""
+Write-Host "============================================================"
