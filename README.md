@@ -1,489 +1,248 @@
 # PowerShell Cleanup Scripts
 
-A collection of Windows PowerShell scripts for cleaning unnecessary files, recovering disk space, detecting exact duplicate files, and identifying large files that may be consuming storage.
+A collection of PowerShell scripts for cleaning unnecessary files, caches, logs, temporary data, and detecting duplicate files on Windows drives.
 
-The scripts are designed to clean **common temporary and cache locations** while avoiding Windows system directories and installed applications wherever possible.
-
-> **Important:** These scripts can permanently delete files. Always read the script and review the paths it targets before running it on your system.
+The repository contains separate cleanup scripts for the **C: drive** and **D: drive**, with different levels of cleanup and duplicate-file handling.
 
 ---
 
-## Features
+## Scripts
 
-### C: Drive Cleanup
+### C Drive Cleanup Script
 
-The C: Drive script performs a deeper cleanup intended for the Windows system drive.
+The C Drive script is designed for cleaning common unnecessary files from the Windows system drive.
 
-It can clean:
+It performs several cleanup operations, including:
 
-* User temporary files
-* Local temporary files
+* Temporary file cleanup
 * Windows temporary files
-* Windows Error Reporting files
-* Old crash dumps
-* Windows Update download cache
-* Delivery Optimization cache
-* Thumbnail and icon caches
-* Recycle Bin
-* Browser caches
-* NVIDIA shader caches
-* DirectX shader cache
-* Microsoft Store cache
-* Temporary installation files
-* Windows component-store leftovers using DISM
-
-It also provides:
-
-* Exact duplicate-file detection
-* SHA-256 based duplicate verification
-* Duplicate-file deletion with explicit confirmation
+* Browser cache cleanup
+* Browser code-cache cleanup
+* NVIDIA shader-cache cleanup
+* DirectX shader-cache cleanup
+* Microsoft Store cache cleanup
+* `.tmp` files in relevant system locations
+* Windows component cleanup using DISM
+* Duplicate-file detection
 * Large-file reporting
-* Before/after free-space measurements
-* Total recovered-space reporting
-* Total execution-time reporting
+* Free-space reporting
 
-The duplicate scanner first groups files by size and then uses SHA-256 hashing to verify that files are actually identical before considering them duplicates.
+### Duplicate Detection
 
-### D: Drive Cleanup
+The script searches the C: drive for potential duplicate files.
 
-The D: Drive script is intentionally more conservative because D: drives commonly contain personal files, games, projects, documents, and other important data.
+To reduce unnecessary hashing, files are first grouped by:
+
+1. File size
+2. SHA-256 hash
+
+Files with the same size and SHA-256 hash are considered exact duplicates.
+
+The script reports duplicate groups and identifies copies that can potentially be removed.
+
+Duplicate deletion requires explicit confirmation before files are removed.
+
+### C Drive Exclusions
+
+Certain Windows and system locations are excluded from the duplicate scan to reduce the risk of interfering with important system files.
+
+These include:
+
+* `C:\Windows`
+* `C:\Program Files`
+* `C:\Program Files (x86)`
+* `C:\ProgramData\Microsoft`
+* `C:\$Recycle.Bin`
+* `C:\System Volume Information`
+
+### Final Report
+
+After the cleanup process, the script reports information such as:
+
+* Free space before cleanup
+* Free space after cleanup
+* Space recovered
+* Duplicate files detected
+* Largest accessible files
+* Total execution time
+
+---
+
+## D Drive Cleanup Script
+
+The D Drive script is designed for cleaning unnecessary files from a data drive while being more conservative about file deletion.
 
 It focuses on:
 
 * Temporary files
 * Cache files
 * Log files
-* Recycle Bin contents
-* Exact duplicate detection
-* Duplicate-size reporting
+* Duplicate-file detection
+* Recycle Bin cleanup
+* Storage reporting
 
-The D: script **does not automatically delete detected duplicate files**. It displays the duplicate paths and the potential amount of recoverable space so that you can review them manually first.
+### Temporary, Cache, and Log Files
 
----
+The script searches the D: drive for files commonly associated with temporary or unnecessary data, including:
 
-## Repository Structure
+* `.tmp`
+* `.temp`
+* `.cache`
+* `.log`
 
-```text
-PowerShell-cleanup-script/
-│
-├── C_Drive CleanUp Script
-│   └── Deep cleanup for the Windows C: drive
-│
-├── D_Drive CleanUp Script
-│   └── Conservative cleanup and duplicate detection for D:
-│
-└── README.md
-```
+These files are identified during the cleanup process.
 
----
+### Duplicate Detection
 
-# Requirements
+The script recursively scans the D: drive for potential duplicate files.
 
-* Windows 10 or Windows 11
-* Windows PowerShell 5.1 or PowerShell 7+
-* Administrator privileges
-* Sufficient free space for temporary operations
+Files are first grouped by size and then compared using SHA-256 hashing.
 
-No third-party software or PowerShell modules are required by the scripts.
+This allows the script to identify files that are exact duplicates rather than simply having similar names.
 
----
+Duplicate files are **reported but are not automatically deleted**.
 
-# Getting Started
+This allows the user to review the detected duplicates before deciding what should be removed.
 
-## 1. Clone the repository
+### D Drive Exclusions
 
-```powershell
-git clone https://github.com/Alinaveedbutt/PowerShell-cleanup-script.git
-```
+System-managed locations are excluded from the scan, including:
 
-Then enter the repository:
+* `D:\System Volume Information`
+* `D:\$RECYCLE.BIN`
 
-```powershell
-cd PowerShell-cleanup-script
-```
+### Final Report
 
-You can also download the repository as a ZIP from GitHub if you do not have Git installed.
+The script provides information about:
+
+* Detected duplicate groups
+* Number of duplicate copies
+* Potential storage space occupied by duplicates
+* Cleanup results
 
 ---
 
-# Running the C: Drive Cleanup
+## C Drive vs D Drive
 
-Open **PowerShell as Administrator**.
-
-Because Windows PowerShell may restrict locally downloaded scripts, you can temporarily allow script execution for the current PowerShell session:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-Then run the script:
-
-```powershell
-& ".\C_Drive CleanUp Script"
-```
-
-If the script has been renamed with a `.ps1` extension:
-
-```powershell
-& ".\C_Drive CleanUp Script.ps1"
-```
-
-### What happens?
-
-The script processes the cleanup stages sequentially.
-
-You will see messages similar to:
-
-```text
-[CLEAN] Temporary files
-[CLEAN] Windows Update cache
-[CLEAN] Browser caches
-[CLEAN] NVIDIA shader cache
-[CLEAN] Windows component store
-```
-
-The script then performs its duplicate scan.
-
-Depending on how much data exists on the C: drive, **duplicate scanning can take considerably longer than the normal cleanup operations** because files must first be discovered and then hashed for exact comparison.
+| Feature                      | C Drive Script    | D Drive Script |
+| ---------------------------- | ----------------- | -------------- |
+| Temporary files              | Yes               | Yes            |
+| Cache files                  | Yes               | Yes            |
+| Log files                    | Yes               | Yes            |
+| Browser caches               | Yes               | No             |
+| NVIDIA shader caches         | Yes               | No             |
+| DirectX shader cache         | Yes               | No             |
+| Microsoft Store cache        | Yes               | No             |
+| Windows component cleanup    | Yes               | No             |
+| Duplicate detection          | Yes               | Yes            |
+| SHA-256 verification         | Yes               | Yes            |
+| Automatic duplicate deletion | With confirmation | No             |
+| Large-file reporting         | Yes               | No             |
+| Recycle Bin cleanup          | Yes               | Yes            |
+| Free-space reporting         | Yes               | Yes            |
 
 ---
 
-# Duplicate Detection
+## Requirements
 
-The duplicate scanner does **not** assume that two files with the same name are duplicates.
+* Windows
+* PowerShell
+* Appropriate permissions for locations being cleaned
 
-Instead, it uses:
-
-```text
-File size → SHA-256 hash → Exact duplicate
-```
-
-Two files are considered duplicates only when their contents produce the same SHA-256 hash.
-
-The C: script also excludes important system locations such as:
-
-```text
-C:\Windows
-C:\Program Files
-C:\Program Files (x86)
-C:\ProgramData\Microsoft
-C:\$Recycle.Bin
-C:\System Volume Information
-```
-
-This significantly reduces the risk of treating system/application files as ordinary user duplicates.
+The scripts are intended to be run locally on Windows.
 
 ---
 
-# Duplicate Deletion
+## Running the Scripts
 
-The C: script does **not silently delete detected duplicates**.
+### C Drive
 
-After displaying the duplicate groups, it asks for explicit confirmation:
-
-```text
-Delete these duplicate copies? Type YES to continue
-```
-
-Only entering:
-
-```text
-YES
-```
-
-continues with duplicate deletion.
-
-Anything else cancels the deletion step.
-
-The script keeps one copy and proposes the remaining byte-for-byte identical copies for deletion.
-
-> **Always review the displayed paths before confirming deletion.**
-
-A duplicate file can be identical in content but still be located somewhere important to a particular application or workflow.
-
----
-
-# Running the D: Drive Cleanup
-
-The D: drive script is intended for drives containing personal data.
-
-Run PowerShell as Administrator and temporarily allow the script:
+Open PowerShell and run the C Drive script:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
+.\C_Drive_Cleanup.ps1
 ```
 
-Then run:
+### D Drive
+
+Open PowerShell and run the D Drive script:
 
 ```powershell
-& ".\D_Drive CleanUp Script"
+Set-ExecutionPolicy -Scope Process Bypass
+.\D_Drive_Cleanup.ps1
 ```
 
-Or, if the file has a `.ps1` extension:
+If PowerShell reports that script execution is disabled, the `Set-ExecutionPolicy` command above enables script execution only for the current PowerShell session.
 
-```powershell
-& ".\D_Drive CleanUp Script.ps1"
+---
+
+## Duplicate File Detection
+
+Duplicate detection works by comparing files using their contents rather than relying only on filenames.
+
+The general process is:
+
+```text
+Find files
+    ↓
+Group files by size
+    ↓
+Identify files with matching sizes
+    ↓
+Calculate SHA-256 hashes
+    ↓
+Compare hashes
+    ↓
+Identify exact duplicates
 ```
 
-The script scans the drive for temporary/cache/log files and exact duplicates.
-
-Unlike the C: script, **detected duplicate files are not automatically deleted**. The script reports the duplicate groups and potential recoverable space so they can be reviewed manually.
+This helps distinguish genuine duplicates from files that merely have the same filename.
 
 ---
 
-# Safety Considerations
+## Safety
 
-These scripts are designed to be conservative, but **no automated cleanup script can guarantee that every deletion is appropriate for every computer**.
+The scripts are designed to avoid blindly deleting arbitrary files.
 
-Before running:
+System locations are excluded from duplicate scanning where appropriate, and duplicate deletion on the C: drive requires explicit confirmation.
 
-### 1. Back up important files
+The D: drive script does not automatically delete detected duplicate files.
 
-Keep backups of important:
-
-* Documents
-* Photos
-* Videos
-* Projects
-* School/university work
-* Game saves
-* Development environments
-* Other irreplaceable data
-
-### 2. Close applications
-
-For the best results, close applications that may be using cache or temporary files, particularly:
-
-* Web browsers
-* Microsoft Store
-* Game launchers
-* Development tools
-* File-management applications
-
-Files currently being used by Windows or another application may simply be skipped.
-
-### 3. Review duplicate files
-
-Exact duplicates are identified by their contents, but deleting one copy can still affect how your files are organized.
-
-Do not blindly approve duplicate deletion if you are unsure why multiple copies exist.
-
-### 4. Recycle Bin cleanup is permanent
-
-When the Recycle Bin is emptied, those files are no longer available through normal Windows recovery.
+As with any cleanup utility, important files should be reviewed before deletion.
 
 ---
 
-# Performance
+## Performance
 
-The cleanup portion is generally much faster than the duplicate-analysis portion.
+Cleanup operations involving temporary files and known cache locations are generally faster than full-drive duplicate detection.
 
-Duplicate detection can be expensive because the script has to:
+Duplicate detection can take considerably longer because the scripts may need to:
 
-1. Enumerate files.
-2. Group files with identical sizes.
-3. Calculate SHA-256 hashes for potential matches.
-4. Compare the resulting hashes.
-5. Display duplicate groups.
+* Recursively enumerate large numbers of files
+* Compare file sizes
+* Calculate SHA-256 hashes
+* Access files across the drive
 
-Files with different sizes cannot be byte-for-byte identical, so size grouping is used as an optimization before hashing.
-
-For this reason, **do not assume that an apparently idle PowerShell window is frozen while duplicate scanning is running**.
-
-Large drives containing many files can take significantly longer to scan.
+The amount of data and number of files on a drive can therefore significantly affect execution time.
 
 ---
 
-# What This Project Does NOT Do
+## What These Scripts Do Not Do
 
 These scripts are not intended to:
 
 * Uninstall applications
-* Delete installed programs
-* Modify personal documents
-* Modify the Windows Registry
-* Disable Windows security features
-* Disable Windows Update
-* Remove Windows system directories
-* Defragment SSDs
-* Automatically determine whether a personal file is "important"
-* Recover corrupted files
+* Remove personal documents automatically
+* Modify application installations
+* Defragment drives
+* Repair corrupted files
+* Replace Windows system maintenance tools
 
-The goal is storage cleanup, not system modification.
+Their primary purpose is **cleanup, duplicate detection, and storage analysis**.
 
 ---
 
-# Recommended Usage
+## License
 
-For a Windows system drive:
-
-```text
-C: Drive
-   ↓
-Run C: Cleanup
-   ↓
-Review duplicate report
-   ↓
-Confirm duplicate deletion only if appropriate
-   ↓
-Review largest files
-   ↓
-Check recovered storage
-```
-
-For a personal/data drive:
-
-```text
-D: Drive
-   ↓
-Run D: Cleanup
-   ↓
-Review temporary/cache/log cleanup
-   ↓
-Review duplicate groups
-   ↓
-Manually decide what duplicates to remove
-```
-
----
-
-# Understanding the Output
-
-At the end of the C: Drive cleanup, the script reports:
-
-```text
-Free space BEFORE
-Free space AFTER
-
-SPACE RECOVERED
-
-Total runtime
-```
-
-This gives you an actual before/after measurement rather than simply estimating how much data was deleted.
-
-The script also generates a report of the largest accessible files on C:, which can help identify what is actually consuming storage.
-
----
-
-# Troubleshooting
-
-## "Running scripts is disabled on this system"
-
-Run:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-This changes the execution policy only for the current PowerShell session.
-
----
-
-## "The term ... is not recognized"
-
-Make sure you are using the correct path.
-
-For example:
-
-```powershell
-& "C:\Path\To\Script.ps1"
-```
-
-If the script is on your Desktop:
-
-```powershell
-& "$env:USERPROFILE\OneDrive\Desktop\Script.ps1"
-```
-
-Your Desktop may be located inside OneDrive depending on your Windows configuration.
-
----
-
-## The script appears to be doing nothing
-
-Some operations can take time without producing continuous output.
-
-The most time-consuming stage is normally duplicate detection because of recursive file enumeration and SHA-256 hashing.
-
-Check whether PowerShell is still using CPU/disk resources before terminating the process.
-
----
-
-## Some files cannot be deleted
-
-This is expected.
-
-Files may be:
-
-* Currently in use
-* Protected by Windows
-* Owned by another process
-* Locked by an application
-* Inaccessible due to permissions
-
-The scripts generally suppress errors for inaccessible files and continue with the remaining cleanup.
-
----
-
-# Contributing
-
-Contributions, improvements, bug reports, and safety suggestions are welcome.
-
-Before submitting a change:
-
-1. Test the script on a non-critical environment.
-2. Make sure system directories are not unintentionally targeted.
-3. Avoid destructive behavior without explicit confirmation.
-4. Document any new cleanup location.
-5. Explain why the location is safe to clean.
-
-For PowerShell scripts, maintaining readable and consistent scripting practices is especially important because these tools directly interact with the filesystem.
-
----
-
-# Disclaimer
-
-**Use these scripts at your own risk.**
-
-The author is not responsible for:
-
-* Data loss
-* Deleted files
-* Application problems
-* Windows configuration issues
-* Corrupted files
-* Loss of access to personal data
-* Any other damage resulting from using or modifying these scripts
-
-Always maintain a backup of important data before performing automated cleanup.
-
----
-
-# License
-
-This repository does not currently specify a license.
-
-If you intend for other people to freely use, modify, and redistribute the scripts, consider adding an open-source license such as the MIT License.
-
----
-
-# Author
-
-**Ali Naveed Butt**
-
-GitHub:
-https://github.com/Alinaveedbutt
-
-Repository:
-https://github.com/Alinaveedbutt/PowerShell-cleanup-script
-
----
-
-## Project Status
-
-**Active Development**
-
-The scripts are intended to evolve as additional cleanup targets, safety checks, performance improvements, and reporting features are added.
-
-If you find a problem or have a suggestion, open an issue in the repository.
+This project is provided as-is for use and modification according to the repository's chosen license.
